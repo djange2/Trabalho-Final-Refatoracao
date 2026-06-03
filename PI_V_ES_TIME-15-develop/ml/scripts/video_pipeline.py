@@ -47,6 +47,7 @@ from ml.scripts.jersey_reader import JerseyReader
 from ml.scripts.trackers.ball_tracker import BallTracker
 from ml.scripts.trackers.tracker import PlayerTracker
 from ml.protocols import IColorExtractor
+from ml.scripts.pipeline_observer import CallbackObserver
 from ml.scripts.config import setup_pipeline_logger
 
 class VideoPipeline:
@@ -138,6 +139,7 @@ class VideoPipeline:
         self.logger, self.session_id = setup_pipeline_logger(output_dir, True) # remover em prod
         self.logger.info(f"=== INICIANDO FAST SCAN (Sessão: {self.session_id}) ===")
 
+        observer = CallbackObserver(on_candidate_found=on_candidate_found)
         os.makedirs(output_dir, exist_ok=True)
         
         cap = cv2.VideoCapture(video_path)
@@ -275,8 +277,7 @@ class VideoPipeline:
                             candidates_found[signature] = cand_dict
                             self.logger.info(f"[FAST SCAN] Novo candidato encontrado e enviado à UI: {num}")
                             
-                            if on_candidate_found:
-                                on_candidate_found(cand_dict)
+                            observer.on_candidate_found(cand_dict)
                             
         finally:
             cap.release()
@@ -318,6 +319,12 @@ class VideoPipeline:
         self.logger, self.session_id = setup_pipeline_logger(output_dir, debug)
         self.logger.info(f"=== INICIANDO PROCESSAMENTO (Sessão: {self.session_id}) ===")
         self.logger.info(f"Vídeo: {video_path} | Alvo inicial: {target_number}")
+
+        observer = CallbackObserver(
+            on_player_found=on_player_found,
+            on_clip_generated=on_clip_generated,
+            on_extracting_start=on_extracting_start,
+        )
 
         if target_signature and "_" in target_signature:
             try:
@@ -390,8 +397,7 @@ class VideoPipeline:
             target_signature=target_signature,
             debug=debug,
         )
-        if on_player_found:
-            on_player_found()
+        observer.on_player_found()
 
         # ============== PASSO 3 ==============
         target_frames, events, clip_intervals = self._compute_clip_intervals(
@@ -403,8 +409,7 @@ class VideoPipeline:
         )
 
         # ============== PASSO 4 ==============
-        if on_extracting_start:
-            on_extracting_start()
+        observer.on_extracting_start()
         results = self._write_clips(
             video_path=video_path,
             clip_intervals=clip_intervals,
@@ -413,7 +418,7 @@ class VideoPipeline:
             output_dir=output_dir,
             fps=fps,
             total_frames=total_frames,
-            on_clip_generated=on_clip_generated,
+            observer=observer,
         )
 
         self._log_metrics(
@@ -797,7 +802,7 @@ class VideoPipeline:
         output_dir: str,
         fps: float,
         total_frames: int,
-        on_clip_generated: Callable | None,
+        observer: CallbackObserver,
     ) -> list[dict]:
         """Fatia o vídeo original em clipes aplicando padding temporal."""
         self.logger.info(f"[4/4] Fatiando vídeo em {len(clip_intervals)} clipes...")
@@ -822,8 +827,7 @@ class VideoPipeline:
                 )
                 if clip_dict:
                     results.append(clip_dict)
-                    if on_clip_generated:
-                        on_clip_generated(clip_dict)
+                    observer.on_clip_generated(clip_dict)
         finally:
             cap.release()
 

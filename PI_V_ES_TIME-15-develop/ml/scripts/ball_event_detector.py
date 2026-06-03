@@ -5,12 +5,16 @@ Responsabilidade única: dado o histórico de posições dos jogadores
 e da bola ao longo do vídeo, identificar momentos em que o jogador-alvo
 teve contato/proximidade com a bola (ex: um toque, um drible).
 """
+import logging
+
 from ml.scripts.config import (
     BALL_IOU_THRESHOLD,
     BALL_PROXIMITY_PAD,
     BALL_PROXIMITY_THRESHOLD,
     EVENT_MIN_GAP_SECONDS,
 )
+
+_logger = logging.getLogger(__name__)
 
 
 class BallEventDetector:
@@ -90,7 +94,7 @@ class BallEventDetector:
                 past_f for past_f in recent_hits if (f_idx - past_f) <= window
             }
 
-            print(f"[BALL] frame={f_idx} | hit={hit} | recent={has_recent_hit}")
+            _logger.debug(f"[BALL] frame={f_idx} | hit={hit} | recent={has_recent_hit}")
 
             # DECISÃO FINAL
             if has_recent_hit and (f_idx - last_event_frame > event_gap_frames):
@@ -100,7 +104,7 @@ class BallEventDetector:
                     "time": f_idx / fps,
                 })
                 last_event_frame = f_idx
-                print(f"[EVENTO] Toque detectado no frame {f_idx} (tempo {f_idx / fps:.2f}s)")
+                _logger.info(f"[EVENTO] Toque detectado no frame {f_idx} (tempo {f_idx / fps:.2f}s)")
 
         return events
 

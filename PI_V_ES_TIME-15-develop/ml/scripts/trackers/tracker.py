@@ -1,21 +1,43 @@
+"""
+Tracker de jogadores baseado em Deep SORT.
+
+Implementa ITracker: recebe detecções de um frame e retorna tracks confirmados
+com IDs persistentes entre frames consecutivos.
+"""
+import numpy as np
 from deep_sort_realtime.deepsort_tracker import DeepSort
 
+
 class PlayerTracker:
-    def __init__(self):
-        self.tracker = DeepSort(max_age=30)
+    """
+    Rastreia jogadores entre frames usando Deep SORT.
 
-    def update(self, detections, frame):
-        tracks = self.tracker.update_tracks(detections, frame=frame)
+    Mantém IDs persistentes por até `max_age` frames sem detecção nova,
+    permitindo acumular votos de OCR por jogador ao longo do vídeo.
+    """
 
-        results = []
+    def __init__(self, max_age: int = 30) -> None:
+        self._tracker = DeepSort(max_age=max_age)
 
-        for track in tracks:
-            if not track.is_confirmed():
-                continue
+    def update(
+        self,
+        detections: list[list],
+        frame: np.ndarray,
+    ) -> list[tuple[int, int, int, int, int]]:
+        """
+        Atualiza o estado do tracker com as detecções do frame atual.
 
-            track_id = track.track_id
-            l, t, r, b = map(int, track.to_ltrb())
+        Args:
+            detections: Lista de [[x1,y1,w,h], conf, cls] no espaço de processamento.
+            frame: Frame atual (usado pelo re-ID do Deep SORT).
 
-            results.append((l, t, r, b, track_id))
-
-        return results
+        Returns:
+            Lista de (l, t, r, b, track_id) para cada track confirmado.
+        """
+        tracks = self._tracker.update_tracks(detections, frame=frame)
+        return [
+            (int(l), int(t), int(r), int(b), track.track_id)
+            for track in tracks
+            if track.is_confirmed()
+            for l, t, r, b in [track.to_ltrb()]
+        ]
