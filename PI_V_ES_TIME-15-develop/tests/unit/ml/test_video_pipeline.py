@@ -5,7 +5,7 @@ No YOLO model is loaded. No video files are needed.
 All tests use synthetic/fabricated data.
 """
 import threading
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -21,65 +21,66 @@ from ml.scripts.config import (
     TORSO_Y_END,
     TORSO_Y_START,
 )
+from ml.scripts.color_strategies import MeanColorExtractor
 
 
 # ---------------------------------------------------------------------------
-# Fixture: VideoPipeline instance with all heavy deps mocked out
+# Fixture: VideoPipeline instance com todas as dependências pesadas mockadas
 # ---------------------------------------------------------------------------
 
 @pytest.fixture(scope="module")
 def pipeline():
-    """Create a VideoPipeline with every heavy dependency mocked."""
-    with patch("ml.detector.YoloDetector"), \
-         patch("ml.detector.BallDetector"), \
-         patch("ml.scripts.jersey_reader.JerseyReader"), \
-         patch("ml.scripts.ball_event_detector.BallEventDetector"), \
-         patch("ml.scripts.kinematic_analyzer.KinematicAnalyzer"), \
-         patch("ml.scripts.clip_writer.ClipWriter"), \
-         patch("ml.scripts.color_extractor.ColorExtractor"):
-        from ml.scripts.video_pipeline import VideoPipeline
+    """Cria um VideoPipeline com todas as dependências pesadas mockadas."""
+    from ml.scripts.video_pipeline import VideoPipeline
 
-        with patch.object(VideoPipeline, "__init__", lambda self: None):
-            p = VideoPipeline()
-            p._tl = threading.local()
-            p._tl.logger = MagicMock()
-            p._tl.session_id = "test-session"
-            p.detector = MagicMock()
-            p.ball_detector = MagicMock()
-            p.jersey_reader = MagicMock()
-            p.ball_event_detector = MagicMock()
-            p.kinematic_analyzer = MagicMock()
-            p.clip_writer = MagicMock()
-            p.color_extractor = MagicMock()
-            return p
+    p = VideoPipeline(
+        detector=MagicMock(),
+        ball_detector=MagicMock(),
+        jersey_reader=MagicMock(),
+        ball_event_detector=MagicMock(),
+        kinematic_analyzer=MagicMock(),
+        clip_writer=MagicMock(),
+        color_extractor=MagicMock(),
+    )
+    p._tl = threading.local()
+    p._tl.logger = MagicMock()
+    p._tl.session_id = "test-session"
+    return p
 
 
 # ===========================================================================
-# _color_distance
+# color_distance — agora testada em MeanColorExtractor diretamente (SRP)
 # ===========================================================================
 
 class TestColorDistance:
-    def test_same_color_returns_zero(self, pipeline):
-        dist = pipeline._color_distance("#ff0000", "#ff0000")
-        assert dist == pytest.approx(0.0, abs=0.1)
+    """
+    Testa MeanColorExtractor.color_distance diretamente.
+    A lógica foi extraída de VideoPipeline para MeanColorExtractor (SRP).
+    """
 
-    def test_black_white_large_distance(self, pipeline):
-        dist = pipeline._color_distance("#000000", "#ffffff")
+    @pytest.fixture
+    def extractor(self):
+        return MeanColorExtractor()
+
+    def test_same_color_returns_zero(self, extractor):
+        assert extractor.color_distance("#ff0000", "#ff0000") == pytest.approx(0.0, abs=0.1)
+
+    def test_black_white_large_distance(self, extractor):
+        dist = extractor.color_distance("#000000", "#ffffff")
         assert dist > 50, f"Expected large distance between black and white, got {dist}"
 
-    def test_invalid_hex_returns_999(self, pipeline):
-        assert pipeline._color_distance("invalid", "#ffffff") == 999.0
+    def test_invalid_hex_returns_999(self, extractor):
+        assert extractor.color_distance("invalid", "#ffffff") == 999.0
 
-    def test_both_invalid_returns_999(self, pipeline):
-        assert pipeline._color_distance("not_a_color", "also_not") == 999.0
+    def test_both_invalid_returns_999(self, extractor):
+        assert extractor.color_distance("not_a_color", "also_not") == 999.0
 
-    def test_similar_colors_small_distance(self, pipeline):
-        # Two shades of red that are close perceptually
-        dist = pipeline._color_distance("#ff0000", "#ee0000")
+    def test_similar_colors_small_distance(self, extractor):
+        dist = extractor.color_distance("#ff0000", "#ee0000")
         assert dist < 20, f"Similar reds should be close, got {dist}"
 
-    def test_very_different_colors_large_distance(self, pipeline):
-        dist = pipeline._color_distance("#ff0000", "#0000ff")
+    def test_very_different_colors_large_distance(self, extractor):
+        dist = extractor.color_distance("#ff0000", "#0000ff")
         assert dist > 30, f"Red vs blue should be a large distance, got {dist}"
 
 

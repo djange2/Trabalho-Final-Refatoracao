@@ -22,7 +22,6 @@ import logging
 import cv2
 import numpy as np
 
-from ml.detector import BallDetector, YoloDetector
 from ml.scripts.ball_event_detector import BallEventDetector
 from ml.scripts.clip_writer import ClipWriter
 from ml.scripts.config import (
@@ -47,7 +46,7 @@ from ml.scripts.kinematic_analyzer import KinematicAnalyzer
 from ml.scripts.jersey_reader import JerseyReader
 from ml.scripts.trackers.ball_tracker import BallTracker
 from ml.scripts.trackers.tracker import PlayerTracker
-from ml.scripts.color_extractor import ColorExtractor
+from ml.protocols import IColorExtractor
 from ml.scripts.config import setup_pipeline_logger
 
 class VideoPipeline:
@@ -67,7 +66,16 @@ class VideoPipeline:
     no construtor e ficam disponíveis enquanto a instância viver.
     """
 
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        detector,
+        ball_detector,
+        jersey_reader,
+        ball_event_detector,
+        kinematic_analyzer,
+        clip_writer,
+        color_extractor: IColorExtractor,
+    ) -> None:
         init_logger = logging.getLogger(__name__)
         logging.basicConfig(level=logging.INFO, format='[%(levelname)s] %(message)s')
 
@@ -79,14 +87,14 @@ class VideoPipeline:
 
         init_logger.info(f"[GPU] {'Ativada' if USE_GPU else 'Desativada — usando CPU'}")
 
-        # Componentes (carregados uma vez)
-        self.detector = YoloDetector()
-        self.ball_detector = BallDetector()
-        self.jersey_reader = JerseyReader()
-        self.ball_event_detector = BallEventDetector()
-        self.kinematic_analyzer = KinematicAnalyzer()
-        self.clip_writer = ClipWriter()
-        self.color_extractor = ColorExtractor()
+        # Componentes injetados via PipelineFactory (DIP: depende de abstrações)
+        self.detector = detector
+        self.ball_detector = ball_detector
+        self.jersey_reader = jersey_reader
+        self.ball_event_detector = ball_event_detector
+        self.kinematic_analyzer = kinematic_analyzer
+        self.clip_writer = clip_writer
+        self.color_extractor = color_extractor
 
         # Tracker é instanciado por vídeo (dentro de process)
         # porque mantém estado interno que não pode vazar entre execuções
@@ -206,7 +214,7 @@ class VideoPipeline:
                     for num in numbers:
                         # Extraindo cor apenas do miolo para evitar piso/fundo
                         # (Repare que usamos o 'crop' já feito, economizando processamento!)
-                        hex_color = self._extract_core_color(crop)
+                        hex_color = self.color_extractor.extract_color(crop)
                         
                         if not hex_color:
                             continue
@@ -215,7 +223,7 @@ class VideoPipeline:
                         is_duplicate = False
                         for existing_sig, existing_data in candidates_found.items():
                             if existing_data["number"] == num:
-                                if self._color_distance(hex_color, existing_data["color"]) < FAST_SCAN_COLOR_TOLERANCE:
+                                if self.color_extractor.color_distance(hex_color, existing_data["color"]) < FAST_SCAN_COLOR_TOLERANCE:
                                     is_duplicate = True
                                     break
                         
@@ -603,8 +611,8 @@ class VideoPipeline:
 
             for n in numbers:
                 if target_color and n == target_number:
-                    hex_color = self._extract_core_color(crop) # Usa nossa média (cv2.mean)
-                    if hex_color and self._color_distance(target_color, hex_color) < TRACKING_COLOR_TOLERANCE:
+                    hex_color = self.color_extractor.extract_color(crop) # Usa nossa média (cv2.mean)
+                    if hex_color and self.color_extractor.color_distance(target_color, hex_color) < TRACKING_COLOR_TOLERANCE:
                         # Jogador correto. Cadastra usando a Assinatura Oficial
                         jersey_map[str(track_id)][target_signature] += 5
                     else:
@@ -617,27 +625,6 @@ class VideoPipeline:
             if debug and debug_dir:
                 self._save_debug_crop(frame_orig, bbox, frame_idx, track_id, numbers, debug_dir)
                 self.logger.debug(f"  [MAP] frame={frame_idx} track={track_id} leu={numbers}")
-
-    def _color_distance(self, hex1: str, hex2: str) -> float:
-        """Calcula a distância perceptual entre duas cores usando o espaço LAB (Visão Humana)"""
-        def hex_to_lab(h: str) -> np.ndarray:
-            h = h.lstrip('#')
-            # Converte Hex string para valores BGR inteiros
-            b, g, r = tuple(int(h[i:i+2], 16) for i in (4, 2, 0))
-            # Cria um "pixel" 1x1 no formato que o OpenCV entende (uint8)
-            pixel_bgr = np.array([[[b, g, r]]], dtype=np.uint8)
-            # Converte para LAB e extrai os valores float
-            pixel_lab = cv2.cvtColor(pixel_bgr, cv2.COLOR_BGR2LAB)
-            return pixel_lab[0][0].astype(float)
-        
-        try:
-            lab1 = hex_to_lab(hex1)
-            lab2 = hex_to_lab(hex2)
-            # Retorna a distância Euclidiana 3D, mas agora no espaço LAB
-            return float(np.linalg.norm(lab1 - lab2))
-        except Exception:
-            self.logger.warning(f"Falha ao calcular cor entre {hex1} e {hex2}")
-            return 999.0 # Em caso de erro de parsing, assume que são muito diferentes
 
     # ======================================================
     # PASSO 2 — RESOLUÇÃO DE IDs
@@ -935,34 +922,6 @@ class VideoPipeline:
             })
             
         return valid_detections, bolas_yolo
-
-    def _extract_core_color(self, torso_crop: np.ndarray) -> str | None:
-        """Extrai a COR MÉDIA da parte superior do torso (ombros/peito). 
-        Evita o efeito flip-flop de camisas divididas."""
-        if torso_crop.size == 0:
-            return None
-        
-        h, w = torso_crop.shape[:2]
-        
-        # Foca apenas nos 40% superiores da imagem (peito para cima)
-        margem_lateral = int(w * 0.15)
-        altura_ombros = int(h * 0.40)
-        
-        shoulders_crop = torso_crop[
-            0 : max(1, altura_ombros),
-            margem_lateral : max(margem_lateral + 1, w - margem_lateral)
-        ]
-        
-        # Fallback de segurança
-        if shoulders_crop.size == 0:
-            shoulders_crop = torso_crop
-            
-        # O PULO DO GATO: Tira a média exata de todos os pixels para neutralizar estampas/dobras
-        mean_bgr = cv2.mean(shoulders_crop)[:3]
-        
-        # Converte o BGR médio para código Hexadecimal
-        hex_color = '#%02x%02x%02x' % (int(mean_bgr[2]), int(mean_bgr[1]), int(mean_bgr[0]))
-        return hex_color
 
     def _is_valid_player_detection(self, bbox_xywh: tuple, frame_h: float) -> bool:
         """
