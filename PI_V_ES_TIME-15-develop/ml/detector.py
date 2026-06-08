@@ -91,7 +91,7 @@ class YoloDetector(BaseYoloDetector):
             cls_i, conf_f = int(cls), float(conf)
             x1, y1, x2, y2 = map(float, box)
             
-            if cls_i in self.player_classes:
+            if cls_i in self.player_classes and conf_f >= self.min_conf:
                 w, h = x2 - x1, y2 - y1
                 if w >= self.min_player_w and h >= self.min_player_h:
                     detections.append([[x1, y1, w, h], conf_f, cls_i])
