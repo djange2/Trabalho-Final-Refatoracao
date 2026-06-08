@@ -14,12 +14,7 @@ import pytest
 # ---------------------------------------------------------------------------
 from ml.scripts.config import (
     GAP_TOLERANCE,
-    MAX_PLAYER_ASPECT_RATIO,
     MIN_CLIP_FRAMES,
-    SCOREBOARD_ZONE_BOTTOM,
-    SCOREBOARD_ZONE_TOP,
-    TORSO_Y_END,
-    TORSO_Y_START,
 )
 from ml.scripts.color_strategies import MeanColorExtractor
 
@@ -41,6 +36,7 @@ def pipeline():
         kinematic_analyzer=MagicMock(),
         clip_writer=MagicMock(),
         color_extractor=MagicMock(),
+        detection_filter=MagicMock(),
     )
     p._tl = threading.local()
     p._tl.logger = MagicMock()
@@ -82,77 +78,6 @@ class TestColorDistance:
     def test_very_different_colors_large_distance(self, extractor):
         dist = extractor.color_distance("#ff0000", "#0000ff")
         assert dist > 30, f"Red vs blue should be a large distance, got {dist}"
-
-
-# ===========================================================================
-# _is_valid_player_detection
-# ===========================================================================
-
-class TestIsValidPlayerDetection:
-    """
-    Config snapshot used in calculations:
-      SCOREBOARD_ZONE_TOP    = 0.18
-      SCOREBOARD_ZONE_BOTTOM = 0.10
-      MAX_PLAYER_ASPECT_RATIO= 1.5
-      TORSO_Y_START          = 0.15
-      TORSO_Y_END            = 0.55
-    """
-
-    def test_wide_bbox_rejected_by_aspect_ratio(self, pipeline):
-        # w=200, h=50 → ratio=4.0 > 1.5
-        bbox = (10, 10, 200, 50)
-        assert pipeline._is_valid_player_detection(bbox, 720) is False
-
-    def test_exact_aspect_ratio_threshold_rejected(self, pipeline):
-        # w/h == MAX_PLAYER_ASPECT_RATIO exactly is NOT > so should pass aspect check,
-        # but let us confirm a ratio just above is rejected
-        w = int(MAX_PLAYER_ASPECT_RATIO * 100) + 1  # e.g. 151
-        h = 100
-        bbox = (10, 200, w, h)
-        assert pipeline._is_valid_player_detection(bbox, 720) is False
-
-    def test_player_torso_in_top_dead_zone_rejected(self, pipeline):
-        """
-        frame_h=720, dead_top = 720 * 0.18 = 129.6
-        y1=0, h=80 → torso_y1 = 0 + 80*0.15 = 12.0 < 129.6 → rejected
-        """
-        bbox = (100, 0, 60, 80)
-        assert pipeline._is_valid_player_detection(bbox, 720) is False
-
-    def test_player_torso_in_bottom_dead_zone_rejected(self, pipeline):
-        """
-        frame_h=720, dead_bottom = 720*(1-0.10) = 648
-        y1=620, h=80 → torso_y2 = 620 + 80*0.55 = 664 > 648 → rejected
-        """
-        bbox = (100, 620, 60, 80)
-        assert pipeline._is_valid_player_detection(bbox, 720) is False
-
-    def test_valid_player_in_center_accepted(self, pipeline):
-        """
-        frame_h=720, dead_top=129.6, dead_bottom=648
-        y1=200, h=120
-          torso_y1 = 200 + 120*0.15 = 218  > 129.6 ✓
-          torso_y2 = 200 + 120*0.55 = 266  < 648   ✓
-        w=60, h=120 → ratio=0.5 < 1.5 ✓
-        """
-        bbox = (100, 200, 60, 120)
-        assert pipeline._is_valid_player_detection(bbox, 720) is True
-
-    def test_zero_height_does_not_raise(self, pipeline):
-        """bbox with h=0 must not crash (division-by-zero guard)."""
-        # h=0 means w/h would divide by zero — the code guards with `h > 0`
-        bbox = (100, 100, 50, 0)
-        # Should not raise; result depends on position but must return bool
-        result = pipeline._is_valid_player_detection(bbox, 720)
-        assert isinstance(result, bool)
-
-    def test_valid_player_small_frame(self, pipeline):
-        """Works correctly on a smaller frame (e.g. 480p)."""
-        # frame_h=480, dead_top=86.4, dead_bottom=432
-        # y1=150, h=100 → torso_y1=165>86.4, torso_y2=205<432
-        # w=40, h=100 → ratio=0.4 < 1.5
-        bbox = (50, 150, 40, 100)
-        assert pipeline._is_valid_player_detection(bbox, 480) is True
 
 
 # ===========================================================================

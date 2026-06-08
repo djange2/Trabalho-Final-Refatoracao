@@ -36,11 +36,6 @@ from ml.scripts.config import (
     USE_GPU,
     TRACKING_COLOR_TOLERANCE,
     FAST_SCAN_COLOR_TOLERANCE,
-    SCOREBOARD_ZONE_TOP,
-    SCOREBOARD_ZONE_BOTTOM,
-    MAX_PLAYER_ASPECT_RATIO,
-    TORSO_Y_START,
-    TORSO_Y_END,
 )
 from ml.scripts.kinematic_analyzer import KinematicAnalyzer
 from ml.scripts.jersey_reader import JerseyReader
@@ -76,6 +71,7 @@ class VideoPipeline:
         kinematic_analyzer,
         clip_writer,
         color_extractor: IColorExtractor,
+        detection_filter,
     ) -> None:
         init_logger = logging.getLogger(__name__)
         logging.basicConfig(level=logging.INFO, format='[%(levelname)s] %(message)s')
@@ -96,6 +92,7 @@ class VideoPipeline:
         self.kinematic_analyzer = kinematic_analyzer
         self.clip_writer = clip_writer
         self.color_extractor = color_extractor
+        self.detection_filter = detection_filter
 
         # Tracker é instanciado por vídeo (dentro de process)
         # porque mantém estado interno que não pode vazar entre execuções
@@ -178,7 +175,7 @@ class VideoPipeline:
                 # =======================================================
                 # 1. PEGA DETECÇÕES JÁ FILTRADAS PELA ZONA DO PLACAR
                 # =======================================================
-                detecoes_validadas, _ = self._get_valid_detections(frame, scale)
+                detecoes_validadas, _ = self.detection_filter.get_valid_detections(frame, scale)
 
                 # =======================================================
                 # 2. PREPARA O LOTE (BATCH) DE RECORTES PARA A GPU
@@ -494,7 +491,7 @@ class VideoPipeline:
             # ---------------------------------------------------------
             # 1. ZONA DE EXCLUSÃO ESPACIAL (Filtragem do Overlay de Transmissão)
             # ---------------------------------------------------------
-            deteccoes_validas, bolas_yolo = self._get_valid_detections(frame, scale)
+            deteccoes_validas, bolas_yolo = self.detection_filter.get_valid_detections(frame, scale)
             valid_detections = [[d["box_yolo"], d["conf"], d["cls"]] for d in deteccoes_validas]
 
             # ---------------------------------------------------------
@@ -589,7 +586,7 @@ class VideoPipeline:
             # OTIMIZAÇÃO 2 (Do Commit): Filtra bboxes panorâmicas geradas pelo tracker
             w_track = r - l
             h_track = b - t
-            if not self._is_valid_player_detection((l, t, w_track, h_track), proc_h):
+            if not self.detection_filter._is_valid_player(l, t, w_track, h_track, proc_h):
                 continue
 
             bbox = (int(l * scale), int(t * scale), int(r * scale), int(b * scale))
@@ -895,63 +892,6 @@ class VideoPipeline:
     # ======================================================
     # HELPERS
     # ======================================================
-
-    def _get_valid_detections(self, frame: np.ndarray, scale: float) -> tuple[list, list]:
-        """
-        Roda o YOLO e aplica a função aprimorada de validação de bboxes do commit recente.
-        """
-        detections, bolas_yolo = self.detector.detect(frame)
-        frame_h = frame.shape[0]
-        
-        valid_detections = []
-        for box, conf, cls in detections:
-            x1, y1, w, h = box
-            
-            # AQUI ESTÁ A INTEGRAÇÃO: Usamos o filtro do Lucas!
-            if not self._is_valid_player_detection((x1, y1, w, h), frame_h):
-                continue
-                
-            bbox_orig = (
-                int(x1 * scale),
-                int(y1 * scale),
-                int((x1 + w) * scale),
-                int((y1 + h) * scale)
-            )
-            
-            valid_detections.append({
-                "box_yolo": box, 
-                "bbox_orig": bbox_orig,
-                "conf": conf,
-                "cls": cls
-            })
-            
-        return valid_detections, bolas_yolo
-
-    def _is_valid_player_detection(self, bbox_xywh: tuple, frame_h: float) -> bool:
-        """
-        Retorna True se o bbox é geometricamente compatível com um jogador.
-
-        Rejeita:
-        - Aspect ratio horizontal demais (bboxes panorâmicas do tracker ou overlays)
-        - Torso crop que intersecta dead zones de overlay de transmissão (topo/base)
-        """
-        x1, y1, w, h = bbox_xywh
-
-        if h > 0 and (w / h) > MAX_PLAYER_ASPECT_RATIO:
-            return False
-
-        torso_y1 = y1 + h * TORSO_Y_START
-        torso_y2 = y1 + h * TORSO_Y_END
-
-        dead_top    = frame_h * SCOREBOARD_ZONE_TOP
-        dead_bottom = frame_h * (1 - SCOREBOARD_ZONE_BOTTOM)
-
-        if torso_y1 < dead_top:
-            return False
-        if torso_y2 > dead_bottom:
-            return False
-
-        return True
 
     def _resize_frame(self, frame: np.ndarray) -> np.ndarray:
         """Redimensiona o frame para largura máxima de PROCESS_WIDTH, registando a alteração."""

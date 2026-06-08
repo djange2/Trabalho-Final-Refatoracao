@@ -16,6 +16,7 @@ from ml.scripts.ball_event_detector import BallEventDetector
 from ml.scripts.kinematic_analyzer import KinematicAnalyzer
 from ml.scripts.clip_writer import ClipWriter
 from ml.scripts.color_strategies import MeanColorExtractor
+from ml.scripts.detection_filter import DetectionFilter
 from ml.protocols import IColorExtractor
 
 
@@ -40,12 +41,14 @@ class PipelineFactory:
             color_extractor: Estratégia de cor customizada.
                              Se None, usa MeanColorExtractor (padrão para tracking).
         """
+        detector = YoloDetector()
         return VideoPipeline(
-            detector=YoloDetector(),
+            detector=detector,
             ball_detector=BallDetector(),
             jersey_reader=JerseyReader(),
             ball_event_detector=BallEventDetector(),
             kinematic_analyzer=KinematicAnalyzer(),
             clip_writer=ClipWriter(),
             color_extractor=color_extractor or MeanColorExtractor(),
+            detection_filter=DetectionFilter(detector=detector),
         )
