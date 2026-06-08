@@ -140,3 +140,11 @@ class BallDetector(BaseYoloDetector):
 
     def _log_init(self) -> None:
         _logger.info(f"[BallDetector] Modelo: {self.model_path} | ball_id={self.ball_class}")
+
+
+def _assert_protocols() -> None:
+    from ml.protocols import IDetector, IBallDetector
+    assert issubclass(YoloDetector, IDetector), "YoloDetector deve implementar IDetector"
+    assert issubclass(BallDetector, IBallDetector), "BallDetector deve implementar IBallDetector"
+
+_assert_protocols()

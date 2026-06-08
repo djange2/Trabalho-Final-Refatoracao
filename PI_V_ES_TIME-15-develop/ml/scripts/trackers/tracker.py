@@ -41,3 +41,10 @@ class PlayerTracker:
             if track.is_confirmed()
             for l, t, r, b in [track.to_ltrb()]
         ]
+
+
+def _assert_tracker_protocol() -> None:
+    from ml.protocols import ITracker
+    assert issubclass(PlayerTracker, ITracker), "PlayerTracker deve implementar ITracker"
+
+_assert_tracker_protocol()
