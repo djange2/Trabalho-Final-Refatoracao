@@ -310,3 +310,60 @@ Usuário acessa "/"
 ### Uploads — `/api/v1/uploads`
 
 Servidos como arquivos estáticos pelo FastAPI.
+
+---
+
+## Pipeline de IA — Arquitetura Interna
+
+### Modelos necessários
+
+Coloque os modelos treinados em `ml/models/` antes de iniciar o backend:
+
+- `ml/models/best.pt` — modelo de leitura de número de camisa (YOLO customizado)
+- `ml/models/ball_tracker.pt` — modelo de detecção de bola (YOLO customizado)
+
+### Uso programático
+
+```python
+from ml.factory import PipelineFactory
+
+pipeline = PipelineFactory.create()
+clips = pipeline.process(
+    video_path="entrada.mp4",
+    target_number=10,
+    output_dir="saida/",
+)
+```
+
+### Rodar os testes
+
+```bash
+python -m pytest tests/ -v
+```
+
+### Padrões GoF aplicados
+
+| Padrão | Categoria | Arquivo |
+|--------|-----------|---------|
+| Strategy | Comportamento | `ml/scripts/color_strategies.py` |
+| Factory Method | Criação | `ml/factory.py` |
+| Observer | Comportamento | `ml/scripts/pipeline_observer.py` |
+| Facade | Estrutura | `ml/scripts/video_pipeline.py` |
+| Template Method | Comportamento | `ml/scripts/video_pipeline.py` |
+
+### Princípios SOLID
+
+| Princípio | Arquivo | Evidência |
+|-----------|---------|-----------|
+| SRP | `ml/scripts/detection_filter.py` | `DetectionFilter` — única responsabilidade: filtrar detecções |
+| OCP | `ml/protocols.py` | `IColorExtractor` — novos extratores sem modificar callers |
+| LSP | `ml/detector.py` | `YoloDetector` e `BallDetector` satisfazem `IDetector`/`IBallDetector` |
+| ISP | `ml/protocols.py` | 4 protocolos coesos em vez de 1 interface monolítica |
+| DIP | `ml/factory.py` | `PipelineFactory.create()` injeta abstrações, não concreções |
+
+### Diagramas
+
+- [`diagrams/c4-context.md`](diagrams/c4-context.md) — Visão de contexto C4
+- [`diagrams/class-gof.md`](diagrams/class-gof.md) — Classes e padrões GoF
+- [`diagrams/sequence-process.md`](diagrams/sequence-process.md) — Sequência do `process()`
+- [`adrs/`](adrs/) — Decisões arquiteturais (ADR-001 a ADR-005)
